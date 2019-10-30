@@ -1,0 +1,72 @@
+module top
+	( input CLOCK_50
+	, input [9:0] SW
+	, output [9:0] LEDR
+	, output [7:0] VGA_R, VGA_G, VGA_B
+	, output VGA_HS, VGA_VS
+	, output VGA_CLK, VGA_BLANK_N, VGA_SYNC_N
+	);
+	
+	// Define botoes
+	wire reset;
+	assign reset = SW[9];
+	wire [3:0] proc_what;
+	assign proc_what = SW[8:5]; // LOW: Erosion, HIGH: Dilatation
+	
+	// Todos os cabos que vamos precisar
+	wire video_on, mem_clock, pixel_clock;
+	wire [9:0] pixel_row, pixel_column;
+	wire [14:0] conc_s;
+	wire mask, mem_q, activate;
+	wire vga_sr, vga_sg, vga_sb;
+	wire red_time, green_time, blue_time;
+	
+	// Alguns multiplexadores
+	assign activate = video_on & mask & out_q;
+	assign mem_clock = video_on & pixel_clock & mask;
+	
+	// Controladora VGA
+	VGA_SYNC v0
+		( .clock_50MHz(CLOCK_50)
+		, .red(activate & red_time), .green(activate & green_time), .blue(activate & blue_time)
+		, .red_out(vga_sr), .green_out(vga_sg), .blue_out(vga_sb)
+		, .horiz_sync_out(VGA_HS), .vert_sync_out(VGA_VS)
+		, .video_on(video_on), .pixel_clock(pixel_clock)
+		, .pixel_row(pixel_row), .pixel_column(pixel_column)
+		);
+	assign VGA_CLK = pixel_clock;
+	assign VGA_BLANK_N = 1;
+	assign VGA_SYNC_N = 0;
+	assign VGA_R = (vga_sr ? 255 : 0);
+	assign VGA_G = (vga_sg ? 255 : 0);
+	assign VGA_B = (vga_sb ? 255 : 0);
+	
+	// Nossos componentes
+	janela j0 (pixel_row, pixel_column, mask, red_time, green_time, blue_time);
+	conc c0 (pixel_row, pixel_column, conc_s);
+	
+	// Tratamento morfologico
+	wire p0_q, p1_q, p2_q, out_q;
+	img_proc p0 (reset, mem_clock, proc_what[3], mem_q, p0_q);
+	img_proc p1 (reset, mem_clock, proc_what[2], p0_q, p1_q);
+	img_proc p2 (reset, mem_clock, proc_what[1], p1_q, p2_q);
+	img_proc p3 (reset, mem_clock, proc_what[0], p2_q, out_q);
+	assign LEDR = {proc_what[3], proc_what[2], proc_what[1], proc_what[0], 5'b0, reset};
+	
+	// Memoria com a Imagem Original
+	altsyncram
+		#( .width_a(1)
+		, .widthad_a(15)
+		, .widthad_byteena_a(1)
+		, .numwords_a(32768)
+		, .init_file("final.mif")
+		, .operation_mode("ROM")
+		, .outdata_aclr_a("NONE")
+		, .outdata_reg_a("CLOCK0")
+		) m0
+		( .address_a(conc_s)
+		, .clock0(mem_clock)
+		, .q_a(mem_q)
+		);
+	
+endmodule
