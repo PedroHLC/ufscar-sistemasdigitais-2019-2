@@ -2,11 +2,14 @@ module janela
 	( input [9:0] r, c
 	, output mask
 	, output rt, gt, bt
+	, output right, bottom
 	);
-	assign mask = (r < 255 && c < 511);
-	assign rt = c < 255;
-	assign gt = r < 127;
-	assign bt = (c >= 255 && r >= 127) || (rt && gt);
+	assign mask = (r <= 255 && c <= 511);
+	assign right = c > 255;
+	assign bottom = r > 127;
+	assign rt = (~right && ~bottom) || (right && bottom);
+	assign gt = bottom;
+	assign bt = right;
 endmodule
 
 module conc

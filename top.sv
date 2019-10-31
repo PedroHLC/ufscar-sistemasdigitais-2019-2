@@ -20,9 +20,10 @@ module top
 	wire mask, mem_q, activate;
 	wire vga_sr, vga_sg, vga_sb;
 	wire red_time, green_time, blue_time;
+	wire sq_right, sq_bottom;
 	
 	// Alguns multiplexadores
-	assign activate = video_on & mask & out_q;
+	assign activate = video_on & mask & (reset ? mem_q : out_q);
 	assign mem_clock = video_on & pixel_clock & mask;
 	
 	// Controladora VGA
@@ -42,15 +43,16 @@ module top
 	assign VGA_B = (vga_sb ? 255 : 0);
 	
 	// Nossos componentes
-	janela j0 (pixel_row, pixel_column, mask, red_time, green_time, blue_time);
+	janela j0 (pixel_row, pixel_column, mask, red_time, green_time, blue_time, sq_right, sq_bottom);
 	conc c0 (pixel_row, pixel_column, conc_s);
 	
 	// Tratamento morfologico
-	wire p0_q, p1_q, p2_q, out_q;
-	img_proc p0 (reset, mem_clock, proc_what[3], mem_q, p0_q);
-	img_proc p1 (reset, mem_clock, proc_what[2], p0_q, p1_q);
-	img_proc p2 (reset, mem_clock, proc_what[1], p1_q, p2_q);
-	img_proc p3 (reset, mem_clock, proc_what[0], p2_q, out_q);
+	wire p0_q, p1_q, p2_q, p3_q, out_q;
+	img_proc p0 (reset, mem_clock, proc_what[3], conc_s, mem_q, p0_q);
+	img_proc p1 (reset, mem_clock, proc_what[2], conc_s, p0_q, p1_q);
+	img_proc p2 (reset, mem_clock, proc_what[1], conc_s, p1_q, p2_q);
+	img_proc p3 (reset, mem_clock, proc_what[0], conc_s, p2_q, p3_q);
+	assign out_q = (sq_right && sq_bottom? p3_q : (sq_bottom ? p2_q : (sq_right ? p1_q : p0_q)));
 	assign LEDR = {proc_what[3], proc_what[2], proc_what[1], proc_what[0], 5'b0, reset};
 	
 	// Memoria com a Imagem Original
