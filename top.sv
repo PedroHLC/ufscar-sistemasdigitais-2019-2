@@ -1,6 +1,6 @@
 module top
 	( input CLOCK_50
-	, input [9:0] SW
+	, input [9:5] SW
 	, output [9:0] LEDR
 	, output [7:0] VGA_R, VGA_G, VGA_B
 	, output VGA_HS, VGA_VS
@@ -11,7 +11,8 @@ module top
 	wire reset;
 	assign reset = SW[9];
 	wire [3:0] proc_what;
-	assign proc_what = SW[8:5]; // LOW: Erosion, HIGH: Dilatation
+	//assign proc_what = SW[8:5]; // LOW: Erosion, HIGH: Dilatation
+	state s0 (reset, pixel_clock, proc_what);
 	
 	// Todos os cabos que vamos precisar
 	wire video_on, mem_clock, pixel_clock;
@@ -71,4 +72,15 @@ module top
 		, .q_a(mem_q)
 		);
 	
+endmodule
+
+module state
+	( input reset, clock
+	, output [3:0] procs
+	);
+	reg [27:0] counter;
+	assign procs = {counter[24], counter[25], counter[26], counter[27]};
+	
+	always @(posedge reset, posedge clock)
+		counter <= (reset ? 0 : ((counter+1) % {28{1'b1}}));
 endmodule

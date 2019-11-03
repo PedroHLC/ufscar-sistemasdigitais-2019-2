@@ -23,12 +23,10 @@ module img_proc
 	);
 	localparam BUF_MAX=514;
 	
-	reg [14:0] addr;
 	reg [0:BUF_MAX] buffer;
+	wire [0:BUF_MAX] new_buffer;
 	wire [8:0] mask;
-	assign mask = { income, buffer[1], buffer[2]
-		, buffer[256], buffer[257], buffer[258]
-		, buffer[512], buffer[513], buffer[514] };
+	wire [14:0] off_addr;
 	wire e0, d0;
 	
 	reg cache [0:32767];
@@ -36,18 +34,19 @@ module img_proc
 	erosion (mask, e0);
 	dilatation (mask, d0);
 	
+	assign off_addr = (out_addr+2) % ({15{1'b1}});
+	assign new_buffer = {income, buffer[0:BUF_MAX-1]};
+	assign mask = { income, buffer[1:2], buffer[256:258], buffer[512:514] };
+	
 	always @(posedge reset, posedge clock)
 		if(reset)
 			begin
 				buffer <= 0;
-				addr <= 0;
 			end
 		else
 			begin
-				addr <= out_addr;
-				outcome <= cache[addr+2];
-				buffer <= buffer >> 1;
-				buffer[0] <= income;
-				cache[addr] <= (which? d0 : e0);
+				outcome <= cache[off_addr];
+				buffer <= new_buffer;
+				cache[out_addr] <= (which? d0 : e0);
 			end
 endmodule
