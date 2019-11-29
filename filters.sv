@@ -15,7 +15,7 @@ module dilatation
 endmodule
 
 module img_cache
-	( input reset, clock, video
+	( input reset, clock, trigger
 	, input mask_feed
 	, input we, write_in
 	, output reg out
@@ -40,17 +40,17 @@ module img_cache
 		end
 	
 	always @(negedge clock)
-		if(video)
-			cache <= { cache[1:(IMG_PIXELS-1)], (reset ? 1'b0 : (we ? write_in : cache[0])) };
+		if(trigger)
+			cache <= { cache[1:(IMG_PIXELS-1)], (reset ? 1'b0 : (we & trigger ? write_in : cache[0])) };
 	
 endmodule
 
 module img_proc
 	( input clock
-	, input video
+	, input trigger
 	, input [2:0] op
 	, input income
-	, output c1, e1, d1, f2, f3, f4, b1, i1
+	, output c1, e1, d1, f2, f3, f4, b1
 	);
 	
 	localparam
@@ -63,21 +63,21 @@ module img_proc
 		S_READ=3'b110,
 		S_READ2=3'b111;
 	
-	wire e0, d0, b0, i0, reset;
+	wire e0, d0, b0, reset;
 	wire [8:0] mask, mask_clean, mask_dilatation, mask_filter_b, mask_filter_c;
 	// LIMPA
-	img_cache cache0(reset, clock, video, income, (op == S_W_LINE0), income, c1, mask_clean);
+	img_cache cache0(reset, clock, trigger, income, (op == S_W_LINE0), income, c1, mask_clean);
 	// ERODI
-	img_cache cache1(reset, clock, video, income, (op == S_W_LINE1), e0, e1, 0);
+	img_cache cache1(reset, clock, trigger, income, (op == S_W_LINE1), e0, e1, 0);
 	// FILTRO
-	img_cache cache2(reset, clock, video, c1, (op == S_W_LINE1), d0, d1, mask_dilatation);
-	img_cache cache3(reset, clock, video, d1, (op == S_W_LINE2), e0, f2, mask_filter_b);
-	img_cache cache4(reset, clock, video, f2, (op == S_W_LINE3), e0, f3, mask_filter_c);
-	img_cache cache5(reset, clock, video, f3, (op == S_W_LINE4), d0, f4, 0);
+	img_cache cache2(reset, clock, trigger, c1, (op == S_W_LINE1), d0, d1, mask_dilatation);
+	img_cache cache3(reset, clock, trigger, d1, (op == S_W_LINE2), e0, f2, mask_filter_b);
+	img_cache cache4(reset, clock, trigger, f2, (op == S_W_LINE3), e0, f3, mask_filter_c);
+	img_cache cache5(reset, clock, trigger, f3, (op == S_W_LINE4), d0, f4, 0);
 	// BORDAS
-	img_cache cache6(reset, clock, video, income, (op == S_W_LINE2), b0, b1, 0);
-	// INVERTE
-	img_cache cache7(reset, clock, video, income, (op == S_W_LINE1), i0, i1, 0);
+	img_cache cache6(reset, clock, trigger, income, (op == S_W_LINE2), b0, b1, 0);
+	// INVERTE (Pura diversao)
+	//img_cache cache7(reset, clock, trigger, income, (op == S_W_LINE1), ~c1, i1, 0);
 	
 	assign reset = (op == S_RESET);
 	
@@ -90,7 +90,6 @@ module img_proc
 		);
 	
 	assign b0 = (e1 ^ d1);
-	assign i0 = ~c1;
 	
 	erosion erosion0 (mask, e0);
 	dilatation dilatation0 (mask, d0);
