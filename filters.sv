@@ -14,39 +14,84 @@ module dilatation
 	assign q = (mask > 0);
 endmodule
 
-module img_proc
-	( input reset, clock
-	, input which
-	, input [14:0] out_addr
-	, input income
-	, output reg outcome
+module img_cache
+	( input reset, clock, video
+	, input mask_feed
+	, input we, write_in
+	, output reg out
+	, output reg [8:0] mask
 	);
-	localparam BUF_MAX=514;
 	
-	reg [0:BUF_MAX] buffer;
-	wire [0:BUF_MAX] new_buffer;
-	wire [8:0] mask;
-	wire [14:0] off_addr;
-	wire e0, d0;
+	localparam
+		IMG_WIDTH=256,
+		IMG_HEIGHT=128,
+		IMG_PIXELS=(IMG_WIDTH*IMG_HEIGHT);
 	
-	reg cache [0:32767];
+	reg [0:(IMG_PIXELS-1)] cache;
 	
-	erosion (mask, e0);
-	dilatation (mask, d0);
+	always @(posedge clock)
+		begin
+			mask <=
+				{ mask_feed, cache[1:2]
+				, cache[IMG_WIDTH:(IMG_WIDTH+2)]
+				, cache[(IMG_WIDTH*2):(IMG_WIDTH*2+2)]
+				};
+			out <= cache[0];
+		end
 	
-	assign off_addr = (out_addr+2) % ({15{1'b1}});
-	assign new_buffer = {income, buffer[0:BUF_MAX-1]};
-	assign mask = { income, buffer[1:2], buffer[256:258], buffer[512:514] };
+	always @(negedge clock)
+		if(video)
+			cache <= { cache[1:(IMG_PIXELS-1)], (reset ? 1'b0 : (we ? write_in : cache[0])) };
 	
-	always @(posedge reset, posedge clock)
-		if(reset)
-			begin
-				buffer <= 0;
-			end
-		else
-			begin
-				outcome <= cache[off_addr];
-				buffer <= new_buffer;
-				cache[out_addr] <= (which? d0 : e0);
-			end
+endmodule
+
+module img_proc
+	( input clock
+	, input video
+	, input [2:0] op
+	, input income
+	, output c1, e1, d1, f2, f3, f4, b1, i1
+	);
+	
+	localparam
+		S_RESET=3'b000,
+		S_W_LINE0=3'b001,
+		S_W_LINE1=3'b010,
+		S_W_LINE2=3'b011,
+		S_W_LINE3=3'b100,
+		S_W_LINE4=3'b101,
+		S_READ=3'b110,
+		S_READ2=3'b111;
+	
+	wire e0, d0, b0, i0, reset;
+	wire [8:0] mask, mask_clean, mask_dilatation, mask_filter_b, mask_filter_c;
+	// LIMPA
+	img_cache cache0(reset, clock, video, income, (op == S_W_LINE0), income, c1, mask_clean);
+	// ERODI
+	img_cache cache1(reset, clock, video, income, (op == S_W_LINE1), e0, e1, 0);
+	// FILTRO
+	img_cache cache2(reset, clock, video, c1, (op == S_W_LINE1), d0, d1, mask_dilatation);
+	img_cache cache3(reset, clock, video, d1, (op == S_W_LINE2), e0, f2, mask_filter_b);
+	img_cache cache4(reset, clock, video, f2, (op == S_W_LINE3), e0, f3, mask_filter_c);
+	img_cache cache5(reset, clock, video, f3, (op == S_W_LINE4), d0, f4, 0);
+	// BORDAS
+	img_cache cache6(reset, clock, video, income, (op == S_W_LINE2), b0, b1, 0);
+	// INVERTE
+	img_cache cache7(reset, clock, video, income, (op == S_W_LINE1), i0, i1, 0);
+	
+	assign reset = (op == S_RESET);
+	
+	assign mask =
+		( op[1] ?
+			( op[0] ? mask_dilatation
+			: mask_clean )
+		: ( op[0] ? mask_filter_c
+		  : mask_filter_b )
+		);
+	
+	assign b0 = (e1 ^ d1);
+	assign i0 = ~c1;
+	
+	erosion erosion0 (mask, e0);
+	dilatation dilatation0 (mask, d0);
 endmodule

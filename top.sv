@@ -1,16 +1,11 @@
 module top
 	( input CLOCK_50
-	, input [9:7] SW
+	, input [9:0] SW
 	, output [9:0] LEDR
 	, output [7:0] VGA_R, VGA_G, VGA_B
 	, output VGA_HS, VGA_VS
 	, output VGA_CLK, VGA_BLANK_N, VGA_SYNC_N
 	);
-	
-	// Define botoes
-	wire [3:0] proc_what;
-	wire reset, just_borders;
-	state s0 (clock, SW[9:7], proc_what, just_borders, reset);
 	
 	// Todos os cabos que vamos precisar
 	wire video_on, mem_clock, pixel_clock;
@@ -18,12 +13,20 @@ module top
 	wire [14:0] conc_s;
 	wire mask, mem_q, activate;
 	wire vga_sr, vga_sg, vga_sb;
-	wire red_time, green_time, blue_time;
-	wire sq_right, sq_bottom;
+	wire red_time, green_time, blue_time, video_time;
+	wire [2:0] which_pic;
 	
 	// Alguns multiplexadores
-	assign activate = video_on & mask & (reset ? mem_q : out_q);
-	assign mem_clock = video_on & pixel_clock & mask;
+	assign video_time = video_on & mask;
+	assign activate = video_time & out_q;
+	assign mem_clock = video_time & pixel_clock;
+	
+	// Estados
+	wire [3:0] current_op;
+	wire reset, next_state, keep_coming;
+	assign reset = SW[9];
+	assign keep_coming = SW[0];
+	state state0 (reset, keep_coming, pixel_clock, next_state, current_op);
 	
 	// Controladora VGA
 	VGA_SYNC v0
@@ -39,27 +42,34 @@ module top
 	assign VGA_CLK = pixel_clock;
 	assign VGA_BLANK_N = 1;
 	assign VGA_SYNC_N = 0;
-	assign VGA_R = (vga_sr ? 255 : 0);
-	assign VGA_G = (vga_sg ? 255 : 0);
-	assign VGA_B = (vga_sb ? 255 : 0);
+	assign VGA_R = (vga_sr ? 8'hFF : 8'b0);
+	assign VGA_G = (vga_sg ? 8'hFF : 8'b0);
+	assign VGA_B = (vga_sb ? 8'hFF : 8'b0);
 	
 	// Nossos componentes
-	janela j0 (pixel_row, pixel_column, mask, red_time, green_time,
-		blue_time, sq_right, sq_bottom);
-	conc c0 (pixel_row, pixel_column, conc_s);
+	janela janela0 (pixel_row, pixel_column, mask, red_time, green_time,
+		blue_time, which_pic, next_state);
+	conc conc0 (pixel_row, pixel_column, conc_s);
 	
 	// Tratamento morfologico
-	wire p0_q, p1_q, p2_q, p3_q, out_q;
-	img_proc p0 (reset, mem_clock, proc_what[3], conc_s, mem_q, p0_q);
-	img_proc p1 (reset, mem_clock, proc_what[2], conc_s, p0_q, p1_q);
-	img_proc p2 (reset, mem_clock, proc_what[1], conc_s, p1_q, p2_q);
-	img_proc p3 (reset, mem_clock, proc_what[0], conc_s, p2_q, p3_q);
-	assign out_q = (just_borders? (p0_q ^ p1_q) :
-			(sq_right && sq_bottom? p3_q :
-				(sq_bottom ? p2_q : (sq_right ? p1_q : p0_q))
-		));
-	assign LEDR = {proc_what[3], proc_what[2], proc_what[1], proc_what[0],
-		just_borders, 4'b0, reset};
+	wire out_q, c1, e1, d1, f2, f3, f4, b1, i1;
+	img_proc proc0 (pixel_clock, video_time, current_op, mem_q,
+		c1, e1, d1, f2, f3, f4, b1, i1);
+	assign LEDR = {reset, 5'b0, current_op[3:0]};
+	
+	// Qual imagem mostrar?
+	always @(*)
+		if(reset)
+			out_q = mem_q;
+		else case(which_pic)
+			3'b000: out_q = c1;
+			3'b001: out_q = d1;
+			3'b010: out_q = e1;
+			3'b011: out_q = f4;
+			3'b100: out_q = b1;
+			3'b101: out_q = i1;
+			default: out_q = 1'b0;
+		endcase
 	
 	// Memoria com a Imagem Original
 	altsyncram
@@ -71,7 +81,7 @@ module top
 		, .operation_mode("ROM")
 		, .outdata_aclr_a("NONE")
 		, .outdata_reg_a("CLOCK0")
-		) m0
+		) mem0
 		( .address_a(conc_s)
 		, .clock0(mem_clock)
 		, .q_a(mem_q)
@@ -80,39 +90,19 @@ module top
 endmodule
 
 module state
-	( input clock
-	, input [2:0] sw
-	, output reg [3:0] procs
-	, output reg just_borders
-	, output reg reset
+	( input reset
+	, input keep_coming
+	, input clock
+	, input next_state
+	, output reg [3:0] state
 	);
 	
-	always @(sw)
-		case(sw)
-			3'b000: begin // IMAGEM ORIGINAL = RESET
-					reset <= 1;
-					procs <= 4'b0000;
-					just_borders <= 0;
-				end
-			3'b001: begin // SO EROSAO
-					reset <= 0;
-					procs <= 4'b0000;
-					just_borders <= 0;
-				end
-			3'b010: begin // SO DILATACAO
-					reset <= 0;
-					procs <= 4'b1111;
-					just_borders <= 0;
-				end
-			3'b011: begin // FILTRO
-					reset <= 0;
-					procs <= 4'b1001;
-					just_borders <= 0;
-				end
-			default: begin // BORDAS
-					reset <= 0;
-					procs <= 4'b0101;
-					just_borders <= 1;
-				end
-		endcase
+	always @(posedge clock, posedge reset)
+		if(reset)
+			state <= 3'b0;
+		else if(next_state)
+			if(state < 3'b101)
+				state <= state + 3'b1;
+			else if (keep_coming)
+				state <= 3'b001;
 endmodule
